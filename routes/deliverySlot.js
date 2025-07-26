@@ -76,59 +76,48 @@ router.post('/', async (req, res) => {
 // Reschedule a delivery slot
 router.patch('/:id/reschedule', async (req, res) => {
     try {
-        // Validate request body
+        // Validate required fields exist and are non-null
         if (!req.body.date || !req.body.scheduledTime) {
             return res.status(400).json({
                 success: false,
-                message: 'Both date and scheduledTime are required'
+                message: 'Date and scheduledTime are required'
             });
         }
 
-        const deliverySlot = await DeliverySlot.findById(req.params.id)
-            .populate('meals.meal'); // Populate meal data if needed
-
-        if (!deliverySlot) {
+        const slot = await DeliverySlot.findById(req.params.id);
+        if (!slot) {
             return res.status(404).json({
                 success: false,
-                message: 'Delivery slot not found'
+                message: 'Slot not found'
             });
         }
 
-        // Convert incoming date to proper Date object
-        const newDate = new Date(req.body.date);
-        if (isNaN(newDate.getTime())) {
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid date format'
-            });
-        }
+        // Ensure all required fields are set
+        const updatedSlot = await DeliverySlot.findByIdAndUpdate(
+            req.params.id,
+            {
+                date: new Date(req.body.date),
+                scheduledTime: req.body.scheduledTime,
+                status: 'rescheduled',
+                updatedAt: new Date()
+            },
+            { new: true, runValidators: true } // Return updated doc and validate
+        ).populate('meals.meal');
 
-        // Update fields
-        deliverySlot.date = newDate;
-        deliverySlot.scheduledTime = req.body.scheduledTime;
-        deliverySlot.status = 'rescheduled';
-
-        // Add updatedAt timestamp
-        deliverySlot.updatedAt = new Date();
-
-        const updatedDeliverySlot = await deliverySlot.save();
-
-        // Return consistent response format
         res.json({
             success: true,
-            data: updatedDeliverySlot,
-            message: 'Delivery slot rescheduled successfully'
+            data: updatedSlot.toObject(), // Convert to plain object
+            message: 'Rescheduled successfully'
         });
 
     } catch (err) {
-        console.error('Reschedule error:', err);
         res.status(500).json({
             success: false,
-            message: 'Server error during rescheduling',
-            error: err.message
+            message: err.message
         });
     }
 });
+
 // Update a meal in a delivery slot (skip, swap, move)
 router.patch('/:slotId/meals/:mealId', async (req, res) => {
     try {
