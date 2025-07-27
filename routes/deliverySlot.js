@@ -76,8 +76,9 @@ router.post('/', async (req, res) => {
 // Reschedule a delivery slot
 router.patch('/:id/reschedule', async (req, res) => {
     try {
-        // Validate required fields exist and are non-null
-        if (!req.body.date || !req.body.scheduledTime) {
+        const { date, scheduledTime } = req.body;
+
+        if (!date || !scheduledTime) {
             return res.status(400).json({
                 success: false,
                 message: 'Date and scheduledTime are required'
@@ -92,22 +93,55 @@ router.patch('/:id/reschedule', async (req, res) => {
             });
         }
 
-        // Ensure all required fields are set
+        // Parse reschedule date and time into a single Date object
+        const rescheduleDate = new Date(date);
+        const [hours, minutes] = scheduledTime.split(':');
+        rescheduleDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+
+        const now = new Date();
+
+        let finalTime = scheduledTime;
+
+        // ⚠️ If rescheduling for today AND time has passed → Auto-select next time slot
+        const isToday = new Date(now.toDateString())?.getTime() === new Date(date)?.getTime();
+        if (isToday && rescheduleDate.getTime() <= now.getTime()) {
+            // Define your available time slots
+            const timeSlots = ['09:00', '11:00', '13:00', '14:00', '17:00', '19:00'];
+
+            // Find the next available time slot
+            const nextSlot = timeSlots.find(ts => {
+                const [h, m] = ts.split(':');
+                const candidateTime = new Date();
+                candidateTime.setHours(parseInt(h), parseInt(m), 0, 0);
+                return candidateTime > now;
+            });
+
+            if (!nextSlot) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'No available time slots left for today'
+                });
+            }
+
+            finalTime = nextSlot;
+        }
+
+        // Update the slot with final date and time
         const updatedSlot = await DeliverySlot.findByIdAndUpdate(
             req.params.id,
             {
-                date: new Date(req.body.date),
-                scheduledTime: req.body.scheduledTime,
+                date: new Date(date),
+                scheduledTime: finalTime,
                 status: 'rescheduled',
                 updatedAt: new Date()
             },
-            { new: true, runValidators: true } // Return updated doc and validate
+            { new: true, runValidators: true }
         ).populate('meals.meal');
 
         res.json({
             success: true,
-            data: updatedSlot.toObject(), // Convert to plain object
-            message: 'Rescheduled successfully'
+            data: updatedSlot.toObject(),
+            message: `Rescheduled successfully to ${finalTime}`
         });
 
     } catch (err) {
@@ -117,6 +151,7 @@ router.patch('/:id/reschedule', async (req, res) => {
         });
     }
 });
+
 
 // Update a meal in a delivery slot (skip, swap, move)
 router.patch('/:slotId/meals/:mealId', async (req, res) => {
