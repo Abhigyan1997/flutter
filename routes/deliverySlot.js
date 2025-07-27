@@ -78,6 +78,7 @@ router.patch('/:id/reschedule', async (req, res) => {
     try {
         const { date, scheduledTime } = req.body;
 
+        // 1. Validate inputs
         if (!date || !scheduledTime) {
             return res.status(400).json({
                 success: false,
@@ -85,31 +86,37 @@ router.patch('/:id/reschedule', async (req, res) => {
             });
         }
 
+        console.log(`⏱️ Reschedule requested: ${date} at ${scheduledTime}`);
+
+        // 2. Check if slot exists
         const slot = await DeliverySlot.findById(req.params.id);
         if (!slot) {
             return res.status(404).json({
                 success: false,
-                message: 'Slot not found'
+                message: 'Delivery slot not found'
             });
         }
 
-        // Parse the desired reschedule date and time
+        // 3. Parse requested date and time into a full Date object
         const rescheduleDate = new Date(date);
-        const [hours, minutes] = scheduledTime.split(':');
-        rescheduleDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+        const [inputHour, inputMin] = scheduledTime.split(':');
+        rescheduleDate.setHours(parseInt(inputHour), parseInt(inputMin), 0, 0);
 
         const now = new Date();
 
-        // Available delivery slots
+        // 4. Define available time slots (can be adjusted)
         const timeSlots = ['09:00', '11:00', '13:00', '14:00', '17:00', '19:00', '21:00', '23:00'];
 
         let finalTime = scheduledTime;
 
-        // If rescheduled datetime is in the past, auto-correct
+        // 5. If the requested time is in the past, adjust
         if (rescheduleDate <= now) {
+            console.warn(`⚠️ Requested time ${rescheduleDate.toLocaleTimeString()} is in the past.`);
+
             const nextSlot = timeSlots.find(ts => {
                 const [h, m] = ts.split(':');
-                const candidate = new Date(date);
+                const candidate = new Date();
+                candidate.setFullYear(now.getFullYear(), now.getMonth(), now.getDate());
                 candidate.setHours(parseInt(h), parseInt(m), 0, 0);
                 return candidate > now;
             });
@@ -117,42 +124,43 @@ router.patch('/:id/reschedule', async (req, res) => {
             if (!nextSlot) {
                 return res.status(400).json({
                     success: false,
-                    message: 'No available time slots left for selected day'
+                    message: 'No available time slots left for today. Please choose a future date.'
                 });
             }
 
             finalTime = nextSlot;
-
-            // Adjust rescheduleDate to new valid time
             const [nextH, nextM] = finalTime.split(':');
             rescheduleDate.setHours(parseInt(nextH), parseInt(nextM), 0, 0);
         }
 
-        // Update the delivery slot
+        // 6. Update the delivery slot
         const updatedSlot = await DeliverySlot.findByIdAndUpdate(
             req.params.id,
             {
-                date: new Date(rescheduleDate.toDateString()), // update date
-                scheduledTime: finalTime, // valid time
+                date: new Date(rescheduleDate.toDateString()), // just the date part
+                scheduledTime: finalTime,
                 status: 'rescheduled',
                 updatedAt: new Date()
             },
             { new: true, runValidators: true }
         ).populate('meals.meal');
 
-        res.json({
+        return res.status(200).json({
             success: true,
-            data: updatedSlot.toObject(),
-            message: `Rescheduled successfully to ${rescheduleDate.toLocaleString()}`
+            message: `Rescheduled successfully to ${rescheduleDate.toLocaleString()}`,
+            data: updatedSlot.toObject()
         });
 
     } catch (err) {
-        res.status(500).json({
+        console.error('❌ Error in reschedule route:', err);
+        return res.status(500).json({
             success: false,
-            message: err.message
+            message: 'Internal server error. Please try again later.',
+            error: err.message
         });
     }
 });
+
 
 
 // Update a meal in a delivery slot (skip, swap, move)
